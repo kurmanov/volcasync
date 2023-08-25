@@ -12,7 +12,7 @@
 #define LED_PIN 13
 #define SYNC_IN_PIN 2
 #define SEQ_DETECTION_THRESHOLD 4
-
+#define DISCONNECT_THRESHOLD_MS 2000
 
 // led state
 volatile byte state = LOW;
@@ -32,6 +32,28 @@ RingBuffer<int> seqDetectionBuffer(3, SEQ_DETECTION_THRESHOLD);
 // elements = instant measured frequency values
 RingBuffer<double> freqMeasureBuffer(5, 0);
 
+void reportMeasure()
+{
+  if (!measureDetected)
+    return;
+
+  stage++;
+  //8 sync signals per measure (2 per quarter note)
+  if (stage == 8) { 
+    stage = 0;
+    char buffer[32];
+    char bpmStr[8];
+    // 2 signals per quarter means we only need to multiply by 30 and not 60 
+    double bpm = freqMeasureBuffer.Average() * 30;
+
+    dtostrf(bpm, 4, 2, bpmStr);
+    sprintf(buffer, "Measure start, BPM = %s\n", bpmStr);
+    Serial.print(buffer);
+    state = true;
+    
+  }
+}
+
 
 void volcaSync() {
   int newTime = millis();
@@ -43,22 +65,15 @@ void volcaSync() {
     return;
   }
 
-  if (measureDetected)
-  {
-    stage++;
-    //8 sync signals per measure (2 per quarter note)
-    if (stage == 8) { 
-      stage = 0;
-      char buffer[32];
-      char bpmStr[8];
-      // 2 signals per quarter means we only need to multiply by 30 and not 60 
-      dtostrf(freqMeasureBuffer.Average() * 30, 4, 2, bpmStr);
-      sprintf(buffer, "Measure start, BPM = %s\n", bpmStr);
-      Serial.print(buffer);
-      state = true;
-    }
+  if (delta > DISCONNECT_THRESHOLD_MS) {
+    
+    Serial.print("Volca has been disconnected, waiting for new measure start\n");
+    measureDetected = false;
+    stage = 0;
   }
-  
+
+  reportMeasure();
+
   seqDetectionBuffer.Put(delta);
 
   // raw value, can only be used after averaging
